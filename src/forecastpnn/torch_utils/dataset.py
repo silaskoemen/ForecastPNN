@@ -2,25 +2,32 @@ from torch.utils.data import Dataset
 import torch
 import numpy as np
 import pandas as pd
+from datetime import datetime, timedelta
 
-reporting_data = lambda x: x[0]
 
+def days_to_date(start_date, num_days, past_units = 1):
+    """
+    Converts number of days since start_date to the corresponding date.
+    
+    Args:
+    `start_date` [str]: The start date in 'YYYY-MM-DD' format.
+    `num_days` [int]: Number of days from the start date.
+    
+    Returns:
+    [datetime]: The corresponding date.
+    """
+    start_date = datetime.strptime(start_date, '%Y-%m-%d')
+    return start_date + timedelta(days=int(num_days+past_units-1))
 
 class ReportingDataset(Dataset):
     ## Theoretically, should contain covariates for date too, return tuple of matrix and covariates as well as label at each iteration
 
     def __init__(
         self,
-        df,
-        max_val,
-        triangle=True,
-        past_units=40,
-        max_delay=40,
-        future_obs=0,
-        device="mps",
-        vector_y=False,
-        dow=False,
-        return_number_obs=False,
+        df: pd.DataFrame | np.ndarray,
+        past_units: int = 12,
+        dow: bool = False,
+        device: str = "mps",
     ):
         """
         Initialize the dataset with a start and end date.
@@ -32,71 +39,49 @@ class ReportingDataset(Dataset):
         - past_days: Number of past days to consider for each matrix.
         - max_delay: Maximum delay to consider for each matrix.
         """
+        if dow:
+            self.min_date = self.df.index.min()
         if isinstance(df, pd.DataFrame):
             self.df = np.array(df, dtype=np.float32)
         else:
             self.df = df
+        self.max_val = np.max(self.df)
         self.past_units = past_units
-        self.max_delay = max_delay
         self.device = device
-        self.triangle = triangle
-        self.max_val = max_val
-        self.future_obs = future_obs
-        self.vector_y = vector_y
         self.dow = dow
-        self.start_date = "2013-01-01"
-        self.return_number_obs = return_number_obs
 
     def get_length(self):
         return self.df.shape[0]
+    
+    def idx_to_weekday(self, idx):
+        return days_to_date(start_date=self.min_date, num_days=idx, past_units=self.past_units).weekday()
+    
+    def get_max_val(self):
+        return self.max_val
+    
+    def setmax_val(self, max_val):
+        self.max_val = max_val
 
     def __len__(self):
         # Calculate the number of days between 60 days after start_date and 46 days before end_date
-        return len(self.df) - (self.past_units - 1) - (self.max_delay - 1)
+        return len(self.df) - (self.past_units - 1)
 
     def __getitem__(self, idx):
         # Calculate the date for the current iteration, considering the adjusted range
-        idx += self.past_units - 1
-        assert idx < len(self.df), "Index out of range"
+        idx += self.past_units
+        assert idx < self.df.shape[0], "Index out of range"
 
-        # Generate the matrix for the current date
+        array = self.df[(idx - self.past_units):idx]
+        target = self.df[idx]
         if self.dow:
-            matrix, dow_val, label = reporting_data(
-                self.df,
-                idx=idx,
-                past_units=self.past_units,
-                max_delay=self.max_delay,
-                future_obs=self.future_obs,
-                vector_y=self.vector_y,
-                dow=self.dow,
-            )
+            # Means daily data
+            dow_val = self.idx_to_weekday(idx)
             dow_val = torch.tensor(dow_val).to(self.device)
-        else:
-            matrix, label = reporting_data(
-                self.df,
-                idx=idx,
-                past_units=self.past_units,
-                max_delay=self.max_delay,
-                future_obs=self.future_obs,
-                vector_y=self.vector_y,
-                dow=self.dow,
-            )
 
-        # Convert the matrix to a PyTorch tensor
-        tensor = torch.from_numpy(matrix)
+        tensor = torch.from_numpy(array)
         tensor = tensor.to(device=self.device)
+        target = torch.tensor([target]).to(self.device)
 
-        if not self.triangle:  # sum
-            tensor = torch.sum(tensor, dim=1)
-
-        # Compute the sum of the delays for the current date (row sum)
-        label = torch.tensor([label]).to(self.device)
-        if self.return_number_obs:
-            num_obs = tensor.sum(axis=1)[
-                -(1 + self.future_obs)
-            ].clone()  # probably wrong
-            label = (label, num_obs)
         if self.dow:
-            return (tensor / self.max_val, dow_val), label
-        return tensor / self.max_val, label
-        # return tensor, label
+            return (tensor / self.max_val, dow_val), target
+        return tensor / self.max_val, target

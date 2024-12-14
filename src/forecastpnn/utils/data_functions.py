@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 from epiweeks import Week
 import torch
@@ -80,7 +79,6 @@ def get_dataset_days(
     reference_col: str,
     past_units: int = 12,
     return_df: bool = False,
-    time_format: str = "%Y-%m-%d",
     dow: bool = True,
 ) -> torch.utils.data.Dataset:
     """Function to transform a given dataframe to a torch dataset.
@@ -96,30 +94,14 @@ def get_dataset_days(
     -------
     [torch.utils.data.Dataset | pd.DataFrame]: Dataset to be used for training.
     """
-    assert reference_col in dataset.columns, "Reference column not found in dataset."
-    try:
-        dataset[reference_col] = pd.to_datetime(
-            dataset[reference_col], format=time_format
-        )
-    except ValueError:
-        raise ValueError(
-            "Reference column cannot be converted to datetime format {}".format(
-                time_format
-            )
-        )
-
-    if dow:
-        logger.warning(
-            "Day of the weeks cannot be used as feature, so keyword dow will be ignored."
-        )
-        dow = False
-
     # Output data is indexed by day, group by each day and find total counts
     dataset = dataset.groupby(reference_col).size().to_frame(name="count")
     # Fill missing days with 0
     dataset = (
         dataset.reindex(
-            pd.date_range(start=dataset.index.min(), end=dataset.index.max(), freq="D")
+            pd.date_range(
+                start=dataset.index.min(), end=dataset.index.max(), freq="D"
+            )
         )
         .fillna(0)
         .astype(int)
@@ -135,8 +117,7 @@ def get_dataset_weeks(
     reference_col: str,
     past_units: int = 12,
     return_df: bool = False,
-    time_format: str = "%Y-%m-%d",
-    dow: bool = True,
+    time_format: str = "%Y-%m-%d"
 ) -> torch.utils.data.Dataset:
     """Function to transform a given dataframe to a torch dataset.
 
@@ -151,34 +132,20 @@ def get_dataset_weeks(
     -------
     [torch.utils.data.Dataset | pd.DataFrame]: Dataset to be used for training.
     """
-    assert reference_col in dataset.columns, "Reference column not found in dataset."
-    try:
-        dataset[reference_col] = pd.to_datetime(
-            dataset[reference_col], format=time_format
-        )
-    except ValueError:
-        raise ValueError(
-            "Reference column cannot be converted to datetime format {}".format(
-                time_format
+    # Input data is indexed by week, group by each week and find total counts
+    dataset = verify_weekly_data(dataset, reference_col, time_format)
+    dataset = dataset.groupby(reference_col).size().to_frame(name="count")
+    # Fill missing weeks with 0
+    dataset = (
+        dataset.reindex(
+            epi_weeks_date_range(
+                min_week=dataset.index.min(), max_week=dataset.index.max()
             )
         )
-
-    if dow:
-        logger.warning(
-            "Day of the weeks cannot be used as feature, so keyword dow will be ignored."
-        )
-        dow = False
-
-    # Add weekly dimension to data
-    dataset["week_ref"] = dataset[reference_col].apply(lambda x: Week.fromdate(x))
-    # Output data is indexed by week, group by each week and find total counts
-    dataset = dataset.groupby("week_ref").count()
-    # Fill missing weeks with 0
-    dataset = dataset.reindex(
-        pd.date_range(
-            start=dataset["week_ref"].min(), end=dataset["week_ref"].max(), freq="W"
-        )
-    ).fillna(0)
+        .fillna(0)
+        .astype(int)
+    )
+    dataset.index.name = None
     if return_df:
         return dataset
     else:
@@ -189,9 +156,7 @@ def get_dataset_days_to_weeks(
     dataset: pd.DataFrame,
     reference_col: str,
     past_units: int = 12,
-    return_df: bool = False,
-    time_format: str = "%Y-%m-%d",
-    dow: bool = True,
+    return_df: bool = False
 ) -> torch.utils.data.Dataset:
     """Function to transform a given dataframe to a torch dataset.
 
@@ -206,34 +171,19 @@ def get_dataset_days_to_weeks(
     -------
     [torch.utils.data.Dataset | pd.DataFrame]: Dataset to be used for training.
     """
-    assert reference_col in dataset.columns, "Reference column not found in dataset."
-    try:
-        dataset[reference_col] = pd.to_datetime(
-            dataset[reference_col], format=time_format
-        )
-    except ValueError:
-        raise ValueError(
-            "Reference column cannot be converted to datetime format {}".format(
-                time_format
-            )
-        )
-
-    if dow:
-        logger.warning(
-            "Day of the weeks cannot be used as feature, so keyword dow will be ignored."
-        )
-        dow = False
-
-    # Input data is indexed by week, just group by each week and find total counts
-    dataset = dataset.groupby(reference_col).count()
+    # Add weekly dimension to data
+    dataset["week_ref"] = dataset[reference_col].apply(
+        lambda x: Week.fromdate(x)
+    )
+    # Output data is indexed by week, group by each week and find total counts
+    dataset = dataset.groupby("week_ref").size().to_frame(name="count")
     # Fill missing weeks with 0
     dataset = dataset.reindex(
-        pd.date_range(
-            start=dataset[reference_col].min(),
-            end=dataset[reference_col].max(),
-            freq="W",
+        epi_weeks_date_range(
+            min_week=dataset.index.min(), max_week=dataset.index.max()
         )
     ).fillna(0)
+    dataset.index.name = None
     if return_df:
         return dataset
     else:
@@ -249,6 +199,8 @@ def get_dataset(
     return_df: bool = False,
     time_format: str = "%Y-%m-%d",
     dow: bool = True,
+    filter_year_min: int = None,
+    filter_year_max: int = None,
 ) -> torch.utils.data.Dataset:
     """Function to transform a given dataframe to a torch dataset.
 
@@ -267,7 +219,7 @@ def get_dataset(
     """
     assert reference_col in dataset.columns, "Reference column not found in dataset."
     # Parse reference column to datetime format, only if daily
-
+    print("reloaded")
     if weeks_in:
         assert (
             weeks_out
@@ -279,28 +231,16 @@ def get_dataset(
         dow = False
 
     if weeks_in:
-        # Input data is indexed by week, group by each week and find total counts
-        dataset = verify_weekly_data(dataset, reference_col, time_format)
-        dataset = dataset.groupby(reference_col).size().to_frame(name="count")
-        # Fill missing weeks with 0
-        dataset = (
-            dataset.reindex(
-                epi_weeks_date_range(
-                    min_week=dataset.index.min(), max_week=dataset.index.max()
-                )
-            )
-            .fillna(0)
-            .astype(int)
+        return get_dataset_weeks(
+            dataset,
+            reference_col,
+            past_units=past_units,
+            return_df=return_df
         )
-        dataset.index.name = None
-        if return_df:
-            return dataset
-        else:
-            return ReportingDataset(dataset, past_units=past_units, dow=False)
     else:
         try:
             dataset[reference_col] = pd.to_datetime(
-                dataset[reference_col], format=time_format
+                dataset[reference_col], format=time_format, errors="coerce"
             )
         except ValueError:
             raise ValueError(
@@ -308,42 +248,20 @@ def get_dataset(
                     time_format
                 )
             )
+        dataset = dataset.dropna(subset=[reference_col])
+        if filter_year_min:
+            dataset = dataset[dataset[reference_col].dt.year >= filter_year_min]
+        if filter_year_max:
+            dataset = dataset[dataset[reference_col].dt.year <= filter_year_max]
 
         if weeks_out:
-            # Add weekly dimension to data
-            dataset["week_ref"] = dataset[reference_col].apply(
-                lambda x: Week.fromdate(x)
+            return get_dataset_days_to_weeks(
+                dataset, reference_col, past_units=past_units, return_df=return_df
             )
-            # Output data is indexed by week, group by each week and find total counts
-            dataset = dataset.groupby("week_ref").size().to_frame(name="count")
-            # Fill missing weeks with 0
-            dataset = dataset.reindex(
-                epi_weeks_date_range(
-                    min_week=dataset.index.min(), max_week=dataset.index.max()
-                )
-            ).fillna(0)
-            dataset.index.name = None
-            if return_df:
-                return dataset
-            else:
-                return ReportingDataset(dataset, past_units=past_units, dow=False)
         else:
-            # Output data is indexed by day, group by each day and find total counts
-            dataset = dataset.groupby(reference_col).size().to_frame(name="count")
-            # Fill missing days with 0
-            dataset = (
-                dataset.reindex(
-                    pd.date_range(
-                        start=dataset.index.min(), end=dataset.index.max(), freq="D"
-                    )
-                )
-                .fillna(0)
-                .astype(int)
+            return get_dataset_days(
+                dataset, reference_col, past_units=past_units, return_df=return_df, dow=dow
             )
-            if return_df:
-                return dataset
-            else:
-                return ReportingDataset(dataset, past_units=past_units, dow=dow)
 
 
 """ Could use to find units of maximum value, return with dataset and then parse to NN as self.const

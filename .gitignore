@@ -1,12 +1,10 @@
 /data/
 /.fpnn_venv/
 /.vscode/
-
 pytest*/
 .pytest*/
 __pycache__/
-
 /src/forecastpnn.egg-info*/
 *.egg-info/
-
 .DS_Store
+/build/
