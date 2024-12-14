@@ -5,3 +5,8 @@
 pytest*/
 .pytest*/
 __pycache__/
+
+/src/forecastpnn.egg-info*/
+*.egg-info/
+
+.DS_Store
