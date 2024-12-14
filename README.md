@@ -2,6 +2,12 @@
 
 ForecastPNN is a project aimed at providing accurate and reliable forecasting using Probabilistic Neural Networks (PNNs).
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/silaskoemen/ForecastPNN)
+![GitHub Release](https://img.shields.io/github/v/release/silaskoemen/ForecastPNN)
+![GitHub Repo stars](https://img.shields.io/github/stars/silaskoemen/ForecastPNN)
+
+
 ## Table of Contents
 - [Introduction](#introduction)
 - [Features](#features)
