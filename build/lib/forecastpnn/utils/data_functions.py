@@ -1,34 +1,10 @@
 import numpy as np
 import pandas as pd
-from epiweeks import Week, Year
-from datetime import datetime
-from plotting import days_to_date
-
-def reporting_data(matrix: np.ndarray, idx: int, past_units: int = 40, max_delay: int = 40, future_obs: int = 0, vector_y = False, dow = False): # future units for future to correct positions
-    """ Function for returning reporting data
-    
-    Easiest with df and index, then just take past units and mask correctly"""
-    assert future_obs < past_units, "Number of future observed units should be smaller than the number of past units included (otherwise exceeds the matrix)"
-    assert future_obs >= 0, "Number of days of additional observations needs to be non-negative"
-    matrix = matrix[(idx-past_units+1):(idx+1), :].copy() # otherwise modifies inplace, changes dataset
-    if vector_y:
-        y = matrix[-(1+future_obs), :].copy()
-    else:
-        y = matrix.sum(axis = 1)[-(1+future_obs)].copy()
-    #y_otd = matrix[-1, 0]
-    mask = np.zeros((past_units, max_delay), dtype=bool)
-    for p in range(max_delay):
-        for d in range(max_delay):
-            if p + d >= max_delay:
-                if abs(p + past_units - max_delay) < past_units:
-                    mask[p+(past_units-max_delay), d] = True
-    matrix[mask] = 0.
-    if dow:
-        return matrix, days_to_date("2013-01-01", idx, past_units).weekday(), y
-    return matrix, y
-
+from epiweeks import Week
 import torch
 from torch.utils.data import Dataset
+from loguru import logger
+
 
 class ReportingDataset(Dataset):
     ## Theoretically, should contain covariates for date too, return tuple of matrix and covariates as well as label at each iteration
@@ -95,7 +71,65 @@ class ReportingDataset(Dataset):
         return tensor/self.max_val, label
         #return tensor, label
 
-def get_dataset(weeks = False, triangle = True, past_units = 40, max_delay = 40, state = "SP", future_obs = 0, return_df = False, return_mat = False, return_number_obs = False, vector_y = False, dow = False, path = "../data/derived/DENGSP.csv", reference_col = None, report_col = None):
+def get_dataset(dataset: pd.DataFrame, reference_col: str,  weeks_in: bool = False, weeks_out: bool = True, past_units: int = 12, return_df: bool = False, time_format: str = "%Y-%m-%d", dow: bool = True) -> torch.utils.data.Dataset:
+    """ Function to transform a given dataframe to a torch dataset.
+    
+    Args
+    ----
+    `dataset` [pd.DataFrame]: dataframe, organized by observations per day or week.
+    `reference_col` [str]: Column to use as reference for the dataset.
+    `weeks_in` [bool]: Whether the input data has observations indexed by week.
+    `weeks_out` [bool]: Whether the output data should have total number of cases per day or week.
+    `past_units` [int]: Number of past units to consider for predictions.
+    `return_df` [bool]: Whether to return the dataset as a dataframe.
+    
+    Returns
+    -------
+    [torch.utils.data.Dataset | pd.DataFrame]: Dataset to be used for training.
+    """
+    assert reference_col in dataset.columns, "Reference column not found in dataset."
+    try:
+        dataset[reference_col] = pd.to_datetime(dataset[reference_col], format=time_format)
+    except ValueError:
+        raise ValueError("Reference column cannot be converted to datetime format {}".format(time_format))
+    
+    assert not weeks_in and not weeks_out, "If incoming data is indexed by weeks, output data cannot be returned by day."
+    if weeks_out and dow:
+        logger.warning("If output data is indexed by weeks, day of the weeks cannot be used as feature, so keyword dow will be ignored.")
+
+    if weeks_in:
+        # Input data is indexed by week, just group by each week and find total counts
+        dataset = dataset.groupby(reference_col).count()
+        # Fill missing weeks with 0
+        dataset = dataset.reindex(pd.date_range(start=dataset[reference_col].min(), end=dataset[reference_col].max(), freq='W')).fillna(0)
+        if return_df:
+            return dataset
+        else:
+            return ReportingDataset(dataset, past_units=past_units, dow=False)
+    else:
+        if weeks_out:
+            # Add weekly dimension to data
+            dataset["week_ref"] = dataset[reference_col].apply(lambda x: Week.fromdate(x))
+            # Output data is indexed by week, group by each week and find total counts
+            dataset = dataset.groupby("week_ref").count()
+            # Fill missing weeks with 0
+            dataset = dataset.reindex(pd.date_range(start=dataset["week_ref"].min(), end=dataset["week_ref"].max(), freq='W')).fillna(0)
+            if return_df:
+                return dataset
+            else:
+                return ReportingDataset(dataset, past_units=past_units, dow=False)
+        else:
+            # Output data is indexed by day, group by each day and find total counts
+            dataset = dataset.groupby(reference_col).count().set_index("date")
+            print(dataset)
+            # Fill missing days with 0
+            dataset = dataset.reindex(pd.date_range(start=dataset.index.min(), end=dataset.index.max(), freq='D')).fillna(0)
+            if return_df:
+                return dataset
+            else:
+                return ReportingDataset(dataset, past_units=past_units, dow=dow)
+
+def get_dataset_old(weeks = False, triangle = True, past_units = 40, max_delay = 40, state = "SP", future_obs = 0, return_df = False, return_mat = False, return_number_obs = False, vector_y = False, dow = False, path = "../data/derived/DENGSP.csv", reference_col = None, report_col = None):
     """ Have to return the iterable dataset, so first read in csv file, then convert to delay-format
     Then feed to iterable dataset and return that
     

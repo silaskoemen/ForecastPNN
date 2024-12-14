@@ -27,6 +27,7 @@ To install ForecastPNN, clone the repository and install the required dependenci
 git clone https://github.com/yourusername/ForecastPNN.git
 cd ForecastPNN
 pip install -r requirements.txt
+pip install .
 ```
 
 ## Usage

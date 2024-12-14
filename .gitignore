@@ -1,2 +1,7 @@
 /data/
 /.fpnn_venv/
+/.vscode/
+
+pytest*/
+.pytest*/
+__pycache__/
