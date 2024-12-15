@@ -27,7 +27,7 @@ class ReportingDataset(Dataset):
         self,
         df: pd.DataFrame | np.ndarray,
         past_units: int = 12,
-        dow: bool = False,
+        time_features: bool = False,
         device: str = "mps",
     ):
         """
@@ -40,16 +40,17 @@ class ReportingDataset(Dataset):
         `dow` [bool]: Whether to include day of the week as a feature.
         `device` [str]: The device to use for the tensor.
         """
-        if dow:
-            self.min_date = df.index.min()
+        """ if dow:
+            self.min_date = df.index.min() """
         if isinstance(df, pd.DataFrame):
             self.df = np.array(df, dtype=np.float32)
         else:
             self.df = df
-        self.max_val = np.max(self.df)
+        self.max_val = np.max(self.df[:, 0])
         self.past_units = past_units
         self.device = device
-        self.dow = dow
+        self.time_features = time_features
+        #self.dow = dow
 
     def get_length(self):
         return self.df.shape[0]
@@ -71,17 +72,12 @@ class ReportingDataset(Dataset):
         idx += self.past_units
         assert idx < self.df.shape[0], f"Index {idx} out of range {self.df.shape[0]}"
 
-        array = self.df[(idx - self.past_units):idx]
-        target = self.df[idx]
-        if self.dow:
-            # Means daily data
-            dow_val = self.idx_to_weekday(idx)
-            dow_val = torch.tensor(dow_val).to(self.device)
-
+        array = self.df[(idx - self.past_units):idx, :]
+        target = self.df[idx, 0]
         tensor = torch.from_numpy(array)
         tensor = tensor.to(device=self.device)
+        prev = torch.tensor(0., dtype=torch.float32)#.0# tensor[-1, 0].clone()
+        tensor[:, 0] /= self.max_val
         label = torch.squeeze(torch.tensor([target]).to(self.device))
 
-        if self.dow:
-            return (tensor / self.max_val, dow_val), label
-        return (tensor / self.max_val, tensor[-1]), label
+        return (tensor, prev), label

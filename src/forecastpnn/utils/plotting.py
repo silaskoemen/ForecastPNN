@@ -2,7 +2,6 @@ import numpy as np
 from torch.utils.data import Subset, DataLoader
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-from forecastpnn.utils.metrics import form_predictions
 from scipy import stats
 import torch
 from sklearn.decomposition import PCA
@@ -11,6 +10,10 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.colors import LinearSegmentedColormap
 import torch
 import pandas as pd
+
+from forecastpnn.utils.metrics import form_predictions
+from forecastpnn.utils.pred_utils import create_multistep_forecasts_interval
+
 plt.rcParams['font.family'] = "Times New Roman" #"cmr10"
 plt.rcParams.update({"axes.labelsize" : "large"}) # 'font.size': 11, 
 #plt.rcParams['font.serif'] = "Computer Modern"
@@ -48,7 +51,7 @@ def plot_entire_confints(dataset, model, n_samples = 200, levels = [0.5, 0.95], 
     plt.plot(y, label=r"True count", c = "black")
     plt.plot(prev, label=r"Previous observation", c = "dodgerblue")
     #plt.plot(y_atm, label="reported on day", c = "darkgrey")
-    plt.plot(preds_median, label = r"Nowcast predictions", c = "crimson", alpha = 0.75)
+    plt.plot(preds_median, label = r"One-Step Forecast predictions", c = "crimson", alpha = 0.75)
     for l in levels:
         lower, upper = intervals_dict[l]
         plt.fill_between(range(len(y)), lower, upper, color = "crimson", alpha = 0.2, label = f"{int(100*l)}% CI")
@@ -76,4 +79,35 @@ def plot_entire_confints(dataset, model, n_samples = 200, levels = [0.5, 0.95], 
         plt.savefig(fr".figures/nowcast_{'week' if weeks else 'day'}_recent")
     else: 
         plt.savefig(fr".figures/nowcast_{'week' if weeks else 'day'}")
+    plt.show()
+
+
+def plot_confints_forecast(dataset, model, n_samples = 200, levels = [0.5, 0.95], idx = 2275, steps = 30, steps_before = 30, weeks = False):
+    """Plot the confidence intervals for a single forecast.
+    
+    Args    
+    ----
+    `dataset` [torch.utils.data.Dataset]: The dataset to use for forecasting.
+    `model` [torch.nn.Module]: The model to use for forecasting.
+    `n_samples` [int]: The number of samples to use for the forecast.
+    `levels` [list]: The confidence levels to use for the forecast.
+    `idx` [int]: The index to use for the forecast.
+    `steps` [int]: The number of steps to forecast.
+    `steps_before` [int]: The number of steps before the forecast.
+    """
+    (forecasts, pred_median), y = create_multistep_forecasts_interval(dataset, idx, model, steps=steps, return_true=True)
+    y_before = [dataset.__getitem__(i)[1].cpu().numpy() for i in range(idx-steps_before, idx)]
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(idx-steps_before, idx), y_before, label=r"True count", c = "black")
+    plt.plot(range(idx, idx+steps), y, label=r"True count", c = "black")
+    plt.plot(range(idx, idx+steps), pred_median, label = r"Forecast predictions", c = "crimson", alpha = 0.75)
+    for l in levels:
+        lower, upper = forecasts[l]
+        plt.fill_between(range(idx, idx+steps), lower, upper, color = "crimson", alpha = 0.2, label = f"{int(100*l)}% CI")
+    plt.grid(alpha=.2)
+    plt.xlabel(fr"{'EpiWeeks' if weeks else 'Days'}")
+    plt.legend()
+    plt.ylabel(r"Number of cases")
+    plt.savefig(fr".figures/forecast_{idx}_{steps}s_{steps_before}b_{'week' if weeks else 'day'}")
     plt.show()

@@ -3,6 +3,7 @@ from epiweeks import Week
 import torch
 from forecastpnn.torch_utils.dataset import ReportingDataset
 from loguru import logger
+import numpy as np
 
 
 def epi_weeks_date_range(min_week: Week, max_week: Week) -> pd.date_range:
@@ -80,6 +81,7 @@ def get_dataset_days(
     past_units: int = 12,
     return_df: bool = False,
     dow: bool = True,
+    time_features: bool = False,
 ) -> torch.utils.data.Dataset:
     """Function to transform a given dataframe to a torch dataset.
 
@@ -106,10 +108,23 @@ def get_dataset_days(
         .fillna(0)
         .astype(int)
     )
+    if time_features:
+        dataset['day_of_year'] = dataset.index.dayofyear
+        # Transform the day of the year using sine and cosine
+        dataset['sin_day_of_year'] = np.sin(2 * np.pi * dataset['day_of_year'] / 365)
+        dataset['cos_day_of_year'] = np.cos(2 * np.pi * dataset['day_of_year'] / 365)
+        dataset.drop(columns=['day_of_year'], inplace=True)
+
+        dataset['day_of_week'] = dataset.index.dayofweek
+
+        # Transform the day of the week using sine and cosine
+        dataset['sin_day_of_week'] = np.sin(2 * np.pi * dataset['day_of_week'] / 7)
+        dataset['cos_day_of_week'] = np.cos(2 * np.pi * dataset['day_of_week'] / 7)
+        dataset.drop(columns=['day_of_week'], inplace=True)
     if return_df:
         return dataset
     else:
-        return ReportingDataset(dataset, past_units=past_units, dow=dow)
+        return ReportingDataset(dataset, past_units=past_units, time_features=True)
 
 
 def get_dataset_weeks(
@@ -149,7 +164,7 @@ def get_dataset_weeks(
     if return_df:
         return dataset
     else:
-        return ReportingDataset(dataset, past_units=past_units, dow=False)
+        return ReportingDataset(dataset, past_units=past_units, time_features=False)
 
 
 def get_dataset_days_to_weeks(
@@ -187,7 +202,7 @@ def get_dataset_days_to_weeks(
     if return_df:
         return dataset
     else:
-        return ReportingDataset(dataset, past_units=past_units, dow=False)
+        return ReportingDataset(dataset, past_units=past_units, time_features=False)
 
 
 def get_dataset(
@@ -201,6 +216,7 @@ def get_dataset(
     dow: bool = True,
     filter_year_min: int = None,
     filter_year_max: int = None,
+    time_features: bool = False,
 ) -> torch.utils.data.Dataset:
     """Function to transform a given dataframe to a torch dataset.
 
@@ -219,7 +235,6 @@ def get_dataset(
     """
     assert reference_col in dataset.columns, "Reference column not found in dataset."
     # Parse reference column to datetime format, only if daily
-    print("reloaded")
     if weeks_in:
         assert (
             weeks_out
@@ -260,7 +275,7 @@ def get_dataset(
             )
         else:
             return get_dataset_days(
-                dataset, reference_col, past_units=past_units, return_df=return_df, dow=dow
+                dataset, reference_col, past_units=past_units, return_df=return_df, time_features=time_features
             )
 
 
