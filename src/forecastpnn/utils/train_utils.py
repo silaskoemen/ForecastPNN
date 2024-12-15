@@ -84,7 +84,10 @@ def train(model, num_epochs, train_loader, val_loader, early_stopper, loss_fct =
                 mat, dow_val = mat.copy()
                 dist_pred = model(mat, dow_val)
             else:
-                dist_pred = model(mat)
+                mat, prev = mat
+                dist_pred = model(mat, prev)
+            print(y)
+            print(dist_pred.mean)
             loss = get_loss(y.to(device), dist_pred, loss_fct=loss_fct).mean()
             loss.retain_grad()
             loss.backward()
@@ -100,7 +103,7 @@ def train(model, num_epochs, train_loader, val_loader, early_stopper, loss_fct =
                     if not valid_gradients:
                         break
             if not valid_gradients:
-                print("Detected inf or nan values in gradients. Not updating model parameters.")
+                #print("Detected inf or nan values in gradients. Not updating model parameters.")
                 optimizer.zero_grad()
         
             optimizer.step()
@@ -119,7 +122,8 @@ def train(model, num_epochs, train_loader, val_loader, early_stopper, loss_fct =
                     mat, dow_val = mat
                     test_pred = model(mat.to(device), dow_val.to(device))
                 else:
-                    test_pred = model(mat)
+                    mat, prev = mat
+                    test_pred = model(mat.to(device), prev.to(device))
                 test_loss = get_loss(y.to(device), test_pred, loss_fct=loss_fct).mean()
                 test_batch_loss += test_loss.item()
             #test_batch_loss /= len(test_loader)
@@ -137,32 +141,22 @@ class EarlyStopper:
     As seen e.g. in https://stackoverflow.com/questions/71998978/early-stopping-in-pytorch and adapted to include 
     restoration of best weights.
     """
-    def __init__(self, past_units, max_delay, weeks = False, future_obs = 0, state = "SP", triangle = True, patience = 30, random_split = False, dow = False, n_training = None, biggest_outbreak = False):
+    def __init__(self, past_units,  weeks = True, future_obs = 0, patience = 30, random_split = False, dow = False):
         self.patience = patience
         self.counter = 0
         self.min_loss = float('inf')
         self.past_units = past_units
-        self.max_delay = max_delay
         self.weeks = weeks
         self.future_obs = future_obs
-        self.state = state
-        self.triangle = triangle
         self.random_split = random_split
         self.dow = dow
-        self.n_training = n_training
-        self.biggest_outbreak = biggest_outbreak
 
     def early_stop(self, val_loss, model):
         if val_loss < self.min_loss:
             self.min_loss = val_loss
             self.counter = 0
             ## Save best weights
-            if self.biggest_outbreak:
-                torch.save(model.state_dict(), f"./weights/weights-{self.past_units}-{self.max_delay}-{'week' if self.weeks else 'day'}-fut{self.future_obs}-biggest{'-dow' if self.dow else ''}")
-            elif self.n_training is not None:
-                torch.save(model.state_dict(), f"./weights/weights-{self.past_units}-{self.max_delay}-{'week' if self.weeks else 'day'}-fut{self.future_obs}{'-rec' if not self.random_split else ''}{'-dow' if self.dow else ''}-{self.n_training}")
-            else:
-                torch.save(model.state_dict(), f"./weights/weights-{self.past_units}-{self.max_delay}-{'week' if self.weeks else 'day'}-fut{self.future_obs}{'-rec' if not self.random_split else ''}{'-dow' if self.dow else ''}")
+            torch.save(model.state_dict(), f".weights/weights-{self.past_units}-{'week' if self.weeks else 'day'}{f'fut{self.future_obs}' if self.future_obs > 1 else ''}{'-rec' if not self.random_split else ''}{'-dow' if self.dow else ''}")
         elif val_loss > self.min_loss:
             self.counter += 1
             if self.counter >= self.patience:
