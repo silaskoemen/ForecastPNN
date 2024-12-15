@@ -80,8 +80,8 @@ class ReportingDataset(Dataset):
 
         tensor = torch.from_numpy(array)
         tensor = tensor.to(device=self.device)
-        target = torch.squeeze(torch.tensor([target]).to(self.device))
+        label = torch.squeeze(torch.tensor([target]).to(self.device))
 
         if self.dow:
-            return (tensor / self.max_val, dow_val), target
-        return (tensor / self.max_val, tensor[-1]), target
+            return (tensor / self.max_val, dow_val), label
+        return (tensor / self.max_val, tensor[-1]), label

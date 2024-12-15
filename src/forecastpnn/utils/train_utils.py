@@ -55,6 +55,9 @@ def mae(y_true, y_pred):
 def mse(y_true, y_pred):
     return (y_true - y_pred.mode).pow(2)
 
+def mse_real(y_true, y_pred):
+    return (y_true - y_pred).pow(2)
+
 def get_loss(y_true, y_pred, loss_fct):
     match loss_fct:
         case "nll":
@@ -65,6 +68,8 @@ def get_loss(y_true, y_pred, loss_fct):
             return mae(y_true, y_pred)
         case "mse":
             return mse(y_true, y_pred)
+        case "mse_real":
+            return mse_real(y_true, y_pred)
     raise ValueError(f"Loss function {loss_fct} not supported. Choose one of hybrid, nll, mse or mae.")
 
 
@@ -84,11 +89,9 @@ def train(model, num_epochs, train_loader, val_loader, early_stopper, loss_fct =
                 mat, dow_val = mat.copy()
                 dist_pred = model(mat, dow_val)
             else:
-                mat, prev = mat
-                dist_pred = model(mat, prev)
-            print(y)
-            print(dist_pred.mean)
-            loss = get_loss(y.to(device), dist_pred, loss_fct=loss_fct).mean()
+                mat, prev = mat.copy()
+                dist_pred = model(mat)
+            loss = get_loss(y.to(device)-torch.squeeze(prev.to(device)), dist_pred, loss_fct=loss_fct).mean()
             loss.retain_grad()
             loss.backward()
             #nn.utils.clip_grad_value_(model.parameters(), 10.0)
@@ -123,8 +126,9 @@ def train(model, num_epochs, train_loader, val_loader, early_stopper, loss_fct =
                     test_pred = model(mat.to(device), dow_val.to(device))
                 else:
                     mat, prev = mat
-                    test_pred = model(mat.to(device), prev.to(device))
-                test_loss = get_loss(y.to(device), test_pred, loss_fct=loss_fct).mean()
+                    #test_pred = model(mat.to(device), prev.to(device))
+                    test_pred = model(mat.to(device))
+                test_loss = get_loss(y.to(device)-torch.squeeze(prev.to(device)), test_pred, loss_fct=loss_fct).mean()
                 test_batch_loss += test_loss.item()
             #test_batch_loss /= len(test_loader)
             if early_stopper.early_stop(test_batch_loss, model):

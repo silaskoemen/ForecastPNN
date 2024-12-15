@@ -35,7 +35,9 @@ def plot_entire_confints(dataset, model, n_samples = 200, levels = [0.5, 0.95], 
     model = model.to("cpu")
     preds = np.zeros((y.shape[0], n_samples))
     for i in range(n_samples):
-        preds[:, i] = np.squeeze(model(mat, prev).sample().numpy()) if not dow else np.squeeze(model(mat, dow_val).sample().numpy())
+        #preds[:, i] = np.squeeze(model(mat, prev).sample().numpy()) if not dow else np.squeeze(model(mat, dow_val).sample().numpy())
+        #preds[:, i] = np.add(model(mat).detach().numpy(), np.squeeze(prev)) if not dow else np.squeeze(model(mat, dow_val).sample().numpy())
+        preds[:, i] = np.add(np.squeeze(model(mat).sample().numpy()), np.squeeze(prev.clone())) if not dow else np.squeeze(model(mat, dow_val).sample().numpy())
     preds_median = np.quantile(preds, 0.5, axis=1)
 
     intervals_dict = {}
@@ -44,6 +46,7 @@ def plot_entire_confints(dataset, model, n_samples = 200, levels = [0.5, 0.95], 
 
     plt.figure(figsize=(10, 6))
     plt.plot(y, label=r"True count", c = "black")
+    plt.plot(prev, label=r"Previous observation", c = "dodgerblue")
     #plt.plot(y_atm, label="reported on day", c = "darkgrey")
     plt.plot(preds_median, label = r"Nowcast predictions", c = "crimson", alpha = 0.75)
     for l in levels:

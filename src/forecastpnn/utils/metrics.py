@@ -50,7 +50,7 @@ def IS(levels: list[float], intervals: dict, y: np.ndarray): #Y NOT PREDS
         over_pen = 2/(1-l)*np.sum(y[over_mask] - upper[over_mask])/len(y) if not np.all(over_mask == False) else 0
         is_scores[i] = np.mean(upper - lower) + under_pen + over_pen
     score = np.mean(is_scores) # this is average interval score
-    print(f"IS: {score}")
+    print(f"IS: {np.round(score, 2)}")
     return score
 
 def WIS(levels: list[float], intervals: dict, y: np.ndarray, pred_med: np.ndarray):
@@ -67,7 +67,7 @@ def WIS(levels: list[float], intervals: dict, y: np.ndarray, pred_med: np.ndarra
         over_pen = 2/(1-l)*np.sum(y[over_mask] - upper[over_mask])/len(y) if not np.all(over_mask == False) else 0
         wis_scores[i] = l/2 * (np.mean(upper - lower) + under_pen + over_pen) # include weight for final calculation
     score = 1/(len(levels)+0.5)*(0.5*np.mean(abs(y - pred_med)) + np.sum(wis_scores))
-    print(f"WIS: {score}")
+    print(f"WIS: {np.round(score, 2)}")
     return score
 
 def IS_decomposed(levels: list[float], intervals: dict, y: np.ndarray):
@@ -89,7 +89,7 @@ def IS_decomposed(levels: list[float], intervals: dict, y: np.ndarray):
         is_scores[2, i] = over_pred
         is_scores[3, i] = np.mean(upper - lower) + over_pred + under_pred
     is_scores = np.mean(is_scores, axis = 1)
-    print(f"IS: under = {is_scores[0]} | spread = {is_scores[1]} | over = {is_scores[2]} | total = {is_scores[3]}")
+    print(f"IS: under = {np.round(is_scores[0], 2)} | spread = {np.round(is_scores[1], 2)} | over = {np.round(is_scores[2], 2)} | total = {np.round(is_scores[3], 2)}")
     return is_scores
 
 import matplotlib.pyplot as plt
@@ -133,7 +133,7 @@ def PICA(levels: list[float], intervals: dict, y: np.ndarray):
         assert upper.shape[0] == y.shape[0], "Length of upper bounds needs to match length of predictions"
         ci_scores[i] = abs(np.mean((y >= lower) & (y <= upper)) - l)
     score = np.mean(ci_scores)
-    print(f"PICA: {score}")
+    print(f"PICA: {np.round(score, 3)}")
     return score
 
 def PINAW(levels: list[float], minmaxes: tuple, intervals: dict):
@@ -212,9 +212,6 @@ def evaluate_model(model, dataset, test_loader, test_batch_size, n_samples = 200
 
 def pnn_PIs(model, test_loader, n_samples: int = 200, levels: list = [0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95], save: bool = False, random_split: bool = False, dow: bool = False, biggest_outbreak: bool = False, number_obs: bool = False):
     mat, y = next(iter(test_loader))
-    if number_obs:
-        y, num_obs = y
-        num_obs = num_obs.to("cpu").numpy()
     if dow:
         mat, dow_val = mat
         dow_val = dow_val.to("cpu")
@@ -227,9 +224,6 @@ def pnn_PIs(model, test_loader, n_samples: int = 200, levels: list = [0.05, 0.1,
     for i in range(n_samples):
         #preds[:, i] = np.squeeze(model(mat).sample().numpy())
         preds[:, i] = model(mat).sample().numpy() if not dow else model(mat, dow_val).sample().numpy()
-        ## Set all predictions below lower bound equal to lower bound if given
-        if number_obs:
-            preds[:, i][preds[:, i] < num_obs] = num_obs[preds[:, i] < num_obs]
     min_preds, max_preds = np.min(preds, axis=1), np.max(preds, axis=1)
     pred_median = np.quantile(preds, 0.5, axis=1)
     #print(pred_median)
@@ -265,12 +259,13 @@ def pnn_PIs_indiv(model, test_loader, n_samples = 200, levels = [0.05, 0.1, 0.25
     model.train()
     model = model.to("cpu")
     mat, y = next(iter(test_loader))
+    mat, prev = mat
+    prev = np.squeeze(prev.to("cpu").numpy())
     mat, y = mat.to("cpu"), y.to("cpu").numpy()
     preds = np.zeros((y.shape[0], n_samples))
     for i in range(n_samples):
         #preds[:, i] = np.squeeze(model(mat).sample().numpy())
-        temp_counts = model(mat).sample().numpy()
-        preds[:, i] = form_predictions(temp_counts, y, future_obs)
+        preds[:, i] = np.add(model(mat).sample().numpy(), prev)
     min_preds, max_preds = np.min(preds, axis=1), np.max(preds, axis=1)
     pred_median = np.quantile(preds, 0.5, axis=1)
 
@@ -288,12 +283,7 @@ def pnn_PIs_indiv(model, test_loader, n_samples = 200, levels = [0.05, 0.1, 0.25
 
 def evaluate_PIs(intervals_dict, test_loader, levels = [0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95], return_y = False, return_coverages = True, return_is_decomposed = True, total = True, number_obs = False):
     _, y = next(iter(test_loader))
-    if number_obs:
-        y, _ = y
     y = y.to("cpu").numpy()
-    if not total:
-        y = y.sum(axis = 1)
-
     if len(y.shape) == 2:
         y = np.squeeze(y)
 
