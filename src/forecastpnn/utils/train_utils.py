@@ -72,11 +72,12 @@ def get_loss(y_true, y_pred, loss_fct):
             return mse_real(y_true, y_pred)
     raise ValueError(f"Loss function {loss_fct} not supported. Choose one of hybrid, nll, mse or mae.")
 
+import random
 
 def train(model, num_epochs, train_loader, val_loader, early_stopper, loss_fct = "nll", device = torch.device("mps"), dow = False, num_obs = False):
     model.to(device)
     model.float()
-    optimizer = torch.optim.Adam(model.parameters(), lr = 0.0003, weight_decay=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr = 0.001, weight_decay=1e-3)
     early_stopper.reset() # set counter to zero if same instance used for multiple training runs
     for e in range(num_epochs):
         batch_loss = 0.
@@ -91,7 +92,9 @@ def train(model, num_epochs, train_loader, val_loader, early_stopper, loss_fct =
             else:
                 mat, prev = mat.copy()
                 dist_pred = model(mat)
-            loss = get_loss(y.to(device)-torch.squeeze(prev.to(device)), dist_pred, loss_fct=loss_fct).mean()
+            if random.uniform(0, 1) < 0.05:
+                print(f"True: {y[0]:.3f}, Pred: {dist_pred.mean[0]:.3f}, Std: {dist_pred.stddev[0]:.3f}")
+            loss = get_loss(y.to(device), dist_pred, loss_fct=loss_fct).mean()
             loss.retain_grad()
             loss.backward()
             #nn.utils.clip_grad_value_(model.parameters(), 10.0)
@@ -138,6 +141,75 @@ def train(model, num_epochs, train_loader, val_loader, early_stopper, loss_fct =
         #if e % 50 == 0 or e == num_epochs-1:
         print(f"Epoch {e+1} - Train loss: {batch_loss:.3} - Val loss: {test_batch_loss:.3} - ES count: {early_stopper.get_count()}")
     
+
+def train_multistep(model, num_epochs, train_loader, val_loader, early_stopper, loss_fct = "nll", device = torch.device("mps")):
+    model.to(device)
+    model.float()
+    optimizer = torch.optim.Adam(model.parameters(), lr = 0.001, weight_decay=1e-3)
+    early_stopper.reset() # set counter to zero if same instance used for multiple training runs
+    for e in range(num_epochs):
+        batch_loss = 0.
+        model.train()
+        for mat, y in train_loader:
+            optimizer.zero_grad()
+            mat, prev = mat.copy()
+            total_loss = 0.
+            current_mat = mat.clone()
+            
+            # For each step ahead, predict and update input matrix
+            for step in range(y.shape[1]):
+                dist_pred = model(current_mat.to(device))
+                step_loss = get_loss(y[:, step].to(device), dist_pred, loss_fct=loss_fct)
+                total_loss += step_loss.mean()
+                
+                if step < y.shape[1] - 1:  # Don't update for last prediction
+                    # Update input matrix with prediction mean for next step
+                    current_mat = torch.roll(current_mat, -1, dims=1)
+                    current_mat[:, -1] = torch.unsqueeze(dist_pred.mean.detach(), 1)
+            
+            loss = total_loss
+            loss.retain_grad()
+            loss.backward()
+
+            # Check for inf or nan gradients
+            valid_gradients = True
+            for name, param in model.named_parameters():
+                if param.grad is not None:
+                    valid_gradients = not (torch.isnan(param.grad).any())
+                    if not valid_gradients:
+                        break
+            if not valid_gradients:
+                optimizer.zero_grad()
+            else:
+                optimizer.step()
+            batch_loss += loss.item()
+        
+        batch_loss /= len(train_loader)
+        with torch.no_grad(): # performance on test/validation set
+            model.eval()
+            test_batch_loss = 0.
+            for mat, y in val_loader:
+                mat, prev = mat
+                total_test_loss = 0.
+                current_mat = mat.clone()
+                
+                # Similar multi-step evaluation for validation set
+                for step in range(y.shape[1]):
+                    test_pred = model(current_mat.to(device))
+                    step_loss = get_loss(y[:, step].to(device), test_pred, loss_fct=loss_fct)
+                    total_test_loss += step_loss.mean()
+                    
+                    if step < y.shape[1] - 1:
+                        current_mat = torch.roll(current_mat, -1, dims=1)
+                        current_mat[:, -1] = torch.unsqueeze(test_pred.mean.detach(), 1)
+                
+                test_batch_loss += total_test_loss.item()
+
+            if early_stopper.early_stop(test_batch_loss, model):
+                model.train()
+                break
+        model.train()
+        print(f"Epoch {e+1} - Train loss: {batch_loss:.3} - Val loss: {test_batch_loss:.3} - ES count: {early_stopper.get_count()}")
 
 class EarlyStopper:
     """ Class implementing early stopping. Theoretically, PyTorch lightning could be used, but this might be more rubust.

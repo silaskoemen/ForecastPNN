@@ -132,3 +132,76 @@ class ForecastPNNDay(nn.Module):
         dist = StudentT(df=self.past_units-1, loc = self.const * x[:, 0], scale = self.const/10*self.softplus(x[:, 1])+1e-5)
         return torch.distributions.Independent(dist, reinterpreted_batch_ndims=1)
 
+
+class TCNInception(nn.Module):
+    def __init__(self, past_units=42):
+        super().__init__()
+        self.branch3 = nn.Conv1d(1, 4, kernel_size=3, padding=0)
+        self.branch7 = nn.Conv1d(1, 4, kernel_size=7, padding=0)
+        self.branch14 = nn.Conv1d(1, 4, kernel_size=15, padding=0)
+        self.pool = nn.AdaptiveAvgPool1d(4)
+        self.fc_concat = nn.Linear(4 * 3 * 4, 24)
+        self.fc2 = nn.Linear(24, 12)
+        self.fc_final = nn.Linear(12, 2)
+        self.bnorm1 = nn.BatchNorm1d(num_features=48)
+        self.bnorm2 = nn.BatchNorm1d(num_features=24)
+        self.drop1 = nn.Dropout(0.1)
+        self.softplus = nn.Softplus()
+
+    def forward(self, x):
+        x = x.transpose(1, 2)  # ensure shape [batch_size, 1, length]
+        #print(x.shape)
+        b3 = self.branch3(x)
+        b7 = self.branch7(x)
+        b14 = self.branch14(x)
+        #print(b3.shape, b7.shape, b14.shape)
+        b3 = self.pool(b3)
+        b7 = self.pool(b7)
+        b14 = self.pool(b14)
+        #print(b3.shape, b7.shape, b14.shape)
+        merged = torch.cat([b3, b7, b14], dim=1)
+        merged = merged.view(merged.size(0), -1)
+        params = self.fc_concat(self.bnorm1(merged))
+        params = self.drop1(params)
+        params = self.fc2(self.bnorm2(params))
+        params = self.fc_final(params)
+        loc, scale = params[:, 0], self.softplus(params[:, 1]) + 1e-5
+        dist = Normal(loc, scale)
+        return torch.distributions.Independent(dist, reinterpreted_batch_ndims=1)
+
+
+class TCNForecaster(nn.Module):
+    def __init__(self, past_units=42, channels = 3):
+        super().__init__()
+        # Could do kdim 10, vdim 1 to have same output format but higher internal dim
+        self.att1 = nn.MultiheadAttention(embed_dim=1, num_heads=1, batch_first=True)
+        self.fc_att = nn.Linear(past_units, past_units)
+        self.branch7 = nn.Conv1d(1, channels, kernel_size=7, padding='same')
+        self.fc_concat = nn.Linear(channels * past_units, 24)
+        self.fc2 = nn.Linear(24, 12)
+        self.fc_final = nn.Linear(12, 2)
+        self.bnorm1 = nn.BatchNorm1d(num_features=channels*past_units)
+        self.bnorm2 = nn.BatchNorm1d(num_features=24)
+        self.bnorm3 = nn.BatchNorm1d(num_features=12)
+        self.drop1 = nn.Dropout(0.1)
+        self.drop2 = nn.Dropout(0.1)
+        self.softplus = nn.Softplus()
+        self.const = 50
+        self.act = nn.SiLU()
+
+    def forward(self, x):
+        # Add self-attention layer
+        x_add = self.att1(x, x, x, need_weights=False)[0]
+        x_add = self.act(self.fc_att(torch.squeeze(x_add)))
+        x = x + x_add.unsqueeze(-1)
+        x = x.transpose(1, 2)  # ensure shape [batch_size, 1, length]
+        x_add = self.branch7(x)
+        x = x + x_add
+        x = self.act(self.fc_concat(self.bnorm1(x.view(x.size(0), -1))))
+        x = self.drop1(x)
+        x = self.act(self.fc2(self.bnorm2(x)))
+        x = self.drop2(x)
+        x = self.fc_final(self.bnorm3(x))
+        loc, scale = x[:, 0], self.softplus(x[:, 1])/self.const + 1e-5
+        dist = Normal(loc, scale)
+        return torch.distributions.Independent(dist, reinterpreted_batch_ndims=1)

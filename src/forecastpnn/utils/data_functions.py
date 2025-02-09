@@ -1,7 +1,7 @@
 import pandas as pd
 from epiweeks import Week
 import torch
-from forecastpnn.torch_utils.dataset import ReportingDataset
+from forecastpnn.torch_utils.dataset import ReportingDataset, PercentageDataset, PercentageDatasetMultistep
 from loguru import logger
 import numpy as np
 
@@ -285,3 +285,84 @@ counter = len(str(max_number))
 # Calculate the nearest unit of length based on the counter
 nearest_unit = 10 ** (counter - 1)
 """
+
+def get_dataset_percentage_change(
+    dataset: pd.DataFrame,
+    reference_col: str,
+    past_units: int = 12,
+    weeks_in: bool = False,
+    weeks_out: bool = False,
+    return_df: bool = False,
+    steps_ahead: int = None,
+    time_format: str = "%Y-%m-%d",
+    dow: bool = True,
+    filter_year_min: int = None,
+    filter_year_max: int = None,
+    time_features: bool = False,
+) -> ReportingDataset:
+    # Output data is indexed by day, group by each day and find total counts
+    try:
+        dataset[reference_col] = pd.to_datetime(
+            dataset[reference_col], format=time_format, errors="coerce"
+        )
+    except ValueError:
+        raise ValueError(
+            "Reference column cannot be converted to datetime format {}".format(
+                time_format
+            )
+        )
+    #dataset = dataset.dropna(subset=[reference_col])
+    if filter_year_min:
+        dataset = dataset[dataset[reference_col].dt.year >= filter_year_min]
+    if filter_year_max:
+        dataset = dataset[dataset[reference_col].dt.year <= filter_year_max]
+
+    dataset = dataset.groupby(reference_col).size().to_frame(name="count")
+    # Fill missing days with 0
+    dataset = (
+        dataset.reindex(
+            pd.date_range(
+                start=dataset.index.min(), end=dataset.index.max(), freq="D"
+            )
+        )
+        .fillna(0)
+        .astype(float)  # Changed to float for ratios
+    )
+
+    # Create 7-day rolling average
+    dataset['count'] = dataset['count'].rolling(window=7).mean()
+    # Fill NaN values at the edges with the nearest non-NaN value
+    dataset['count'] = dataset['count'].fillna(method='bfill')
+
+    dataset['perc_count'] = dataset['count'].pct_change()
+    dataset.loc[pd.isna(dataset['perc_count']), 'perc_count'] = 0.0
+    
+    """ # Calculate relative fractions
+    dataset['previous_count'] = dataset['count'].shift(1)
+    # Handle first day and days where previous count was 0
+    dataset.loc[dataset['previous_count'] == 0, 'previous_count'] = 1.0
+    dataset.loc[dataset.index[0], 'previous_count'] = 1.0
+    
+    # Calculate ratio
+    dataset['perc_count'] = dataset['count'] / dataset['previous_count'] """
+    # dataset = dataset.drop('previous_count', axis=1)
+
+    if time_features:
+        dataset['day_of_year'] = dataset.index.dayofyear
+        # Transform the day of the year using sine and cosine
+        dataset['sin_day_of_year'] = np.sin(2 * np.pi * dataset['day_of_year'] / 365)
+        dataset['cos_day_of_year'] = np.cos(2 * np.pi * dataset['day_of_year'] / 365)
+        dataset.drop(columns=['day_of_year'], inplace=True)
+
+        dataset['day_of_week'] = dataset.index.dayofweek
+        # Transform the day of the week using sine and cosine
+        dataset['sin_day_of_week'] = np.sin(2 * np.pi * dataset['day_of_week'] / 7)
+        dataset['cos_day_of_week'] = np.cos(2 * np.pi * dataset['day_of_week'] / 7)
+        dataset.drop(columns=['day_of_week'], inplace=True)
+    
+    if return_df:
+        return dataset
+    else:
+        if steps_ahead is not None:
+            return PercentageDatasetMultistep(dataset, past_units=past_units, steps_ahead=steps_ahead)
+        return PercentageDataset(dataset, past_units=past_units)

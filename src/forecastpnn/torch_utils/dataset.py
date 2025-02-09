@@ -81,3 +81,63 @@ class ReportingDataset(Dataset):
         label = torch.squeeze(torch.tensor([target]).to(self.device))
 
         return (tensor, prev), label
+
+class PercentageDataset(Dataset):
+    def __init__(
+        self,
+        df: pd.DataFrame | np.ndarray,
+        past_units: int = 42,
+        device: str = "mps",
+    ):
+        if isinstance(df, pd.DataFrame):
+            # Ensure columns are in the correct order for [count, perc_count]
+            df = df[['count', 'perc_count']].to_numpy(dtype=np.float32)
+        self.df = df
+        self.past_units = past_units
+        self.device = device
+
+    def __len__(self):
+        return self.df.shape[0] - self.past_units
+    
+    def __getitem__(self, idx):
+        idx += self.past_units
+        y = self.df[idx, 1]  # target percentage at current index
+        past_perc_counts = self.df[idx - self.past_units:idx, 1]
+        prev_true_count = self.df[idx - 1, 0]
+        x_tensor = torch.from_numpy(past_perc_counts).unsqueeze(-1).to(self.device)
+        prev_count_tensor = torch.tensor(prev_true_count, dtype=torch.float32, device=self.device)
+        y_tensor = torch.tensor(y, dtype=torch.float32, device=self.device)
+        return (x_tensor, prev_count_tensor), y_tensor
+
+
+class PercentageDatasetMultistep(Dataset):
+    def __init__(
+        self,
+        df: pd.DataFrame | np.ndarray,
+        past_units: int = 42,
+        steps_ahead: int = 14,
+        device: str = "mps",
+    ):
+        if isinstance(df, pd.DataFrame):
+            df = df[['count', 'perc_count']].to_numpy(dtype=np.float32)
+        self.df = df
+        self.past_units = past_units
+        self.steps_ahead = steps_ahead
+        self.device = device
+
+    def __len__(self):
+        return self.df.shape[0] - self.past_units - (self.steps_ahead - 1)
+
+    def __getitem__(self, idx):
+        idx += self.past_units
+        # Get future percentage values for next steps_ahead days
+        y = self.df[idx:idx + self.steps_ahead, 1]
+        # Get past percentage values
+        past_perc_counts = self.df[idx - self.past_units:idx, 1]
+        prev_true_count = self.df[idx - 1, 0]
+        
+        x_tensor = torch.from_numpy(past_perc_counts).unsqueeze(-1).to(self.device)
+        prev_count_tensor = torch.tensor(prev_true_count, dtype=torch.float32, device=self.device)
+        y_tensor = torch.from_numpy(y).to(self.device)
+        
+        return (x_tensor, prev_count_tensor), y_tensor
