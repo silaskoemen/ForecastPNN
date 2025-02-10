@@ -244,20 +244,22 @@ def plot_confints_forecast_with_updated_inputs(dataset, model, n_samples=200, le
     # Model setup
     model.eval()
     model.drop1.p = 0.025
+    model.drop2.p = 0.025
     model.drop1.train()
+    model.drop2.train()
     # Initialize forecasts array
     forecasts = np.zeros((steps_ahead, n_samples))
-    initial_perc = perc_series.clone()
+    current_perc = perc_series.clone()
     # First step uses original input
-    forecasts[0, :] = np.array([model(initial_perc).sample().item() for _ in range(n_samples)])
+    forecasts[0, :] = np.array([model(current_perc).sample().item() for _ in range(n_samples)])
     
     # Create storage for different percentage series versions
     perc_versions = []
     
     # For remaining steps
     for step in range(1, steps_ahead):
-        prev_quantiles = np.quantile(forecasts[step-1], np.linspace(0.05, 0.95, 10))
-        
+        prev_quantiles = np.quantile(forecasts[step-1], np.linspace(0.05, 0.95, 10), axis = 0)
+        current_perc = torch.roll(current_perc, -1, dims=1)
         """ if step == 1:
             # Initialize 10 versions after first step
             for q in prev_quantiles:
@@ -282,18 +284,13 @@ def plot_confints_forecast_with_updated_inputs(dataset, model, n_samples=200, le
             forecasts[step, i*20:(i+1)*20] = new_samples """
         # For each quantile from previous step
         for i, q in enumerate(prev_quantiles):
-            # Create temporary percentage series with previous quantile
-            temp_perc = initial_perc.clone()
-            temp_perc = torch.roll(temp_perc, -1, dims=1)
-            temp_perc[0, -1] = torch.tensor(q)
+            current_perc[0, -1] = torch.tensor(q)
             
             # Generate new samples using this updated series
-            new_samples = np.array([model(temp_perc).sample().item() for _ in range(20)])
+            new_samples = np.array([model(current_perc).sample().item() for _ in range(20)])
             forecasts[step, i*20:(i+1)*20] = new_samples
             
-        # Update the initial series with median of all samples from this step
-        initial_perc = torch.roll(initial_perc, -1, dims=1)
-        initial_perc[0, -1] = torch.tensor(np.median(forecasts[step]))
+        current_perc[0, -1] = torch.tensor(np.median(forecasts[step-1]))
     
     
     # Plotting
@@ -302,9 +299,10 @@ def plot_confints_forecast_with_updated_inputs(dataset, model, n_samples=200, le
     pred_median = np.median(forecasts, axis=1)
     pred_values = np.cumprod(1+pred_median) * prev
     plt.plot(range(idx, idx+steps_ahead), pred_values, 'r-', label='Forecast predictions', alpha=0.75)
-    true_values = [(1+yv) * prev for yv in y]
+    true_values = np.cumprod(1+y) * prev
     past_values = [(1+dataset[i][1][0].item()) * dataset[i][0][1].item() for i in range(idx-steps_before, idx)]
-    plt.plot(range(idx-steps_before, idx + len(y)), past_values + true_values, 'k-', label='True count')
+    #print(past_values, true_values, type(past_values), type(true_values), len(past_values), len(true_values))
+    plt.plot(range(idx-steps_before, idx + steps_ahead), past_values + list(true_values), 'k-', label='True count')
     plt.axvline(idx, color='black', linestyle='--', label='Start of forecast')
     
     for level in levels:

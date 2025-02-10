@@ -16,6 +16,7 @@ import pandas as pd
 from forecastpnn.utils.train_utils import SubsetSampler as SS
 from forecastpnn.utils.constants import RANDOM_SEED
 
+# Put some in constants file
 WEEKS = False
 PAST_UNITS = 42
 BATCH_SIZE = 64
@@ -26,8 +27,8 @@ data = pd.read_csv('../data/derived/DENGSP.csv', index_col=0)
 #weekly_df = get_dataset(data, 'DT_SIN_PRI', weeks_in=False, weeks_out=WEEKS, past_units=PAST_UNITS, return_df=True, filter_year_min=2013, filter_year_max=2020)
 dl = get_dataset_percentage_change(data, 'DT_SIN_PRI', weeks_in=False, weeks_out=WEEKS, past_units=PAST_UNITS, return_df=False, filter_year_min=2013, filter_year_max=2020, time_features=False)
 
-#n_obs_40pu = len(dataset) # 2922 total dates, -39-39 for past_units and max_delay ->2844
-## Define train and test indices
+# Put all this in either get_dataset or another function on dl to return loaders
+# Alternatively, global class with loaders and train function s.t. just train() has to be called
 if RANDOM_SPLIT:
     all_idcs = range(dl.__len__())
     train_idcs, test_idcs = TTS(all_idcs, test_size=0.25, shuffle=True, random_state=RANDOM_SEED)
@@ -90,7 +91,8 @@ set_seeds(RANDOM_SEED)
 plot_entire_confints_percentage(dl, forecaster, weeks = WEEKS, random_split = RANDOM_SPLIT, test_idcs=test_idcs, xlims=[2500, 2600])
 
 # %%
-STEPS_AHEAD = 21
+STEPS_AHEAD = 14
+PAST_UNITS = 21
 importlib.reload(forecastpnn.utils.data_functions)
 from forecastpnn.utils.data_functions import get_dataset_percentage_change
 dl = get_dataset_percentage_change(data, 'DT_SIN_PRI', weeks_in=False, weeks_out=WEEKS, past_units=PAST_UNITS, return_df=False, filter_year_min=2013, filter_year_max=2020, time_features=False, steps_ahead=STEPS_AHEAD)
@@ -140,6 +142,6 @@ forecaster.load_state_dict(torch.load(f".weights/weights-{PAST_UNITS}-{'week' if
 importlib.reload(forecastpnn.utils.plotting)
 from forecastpnn.utils.plotting import plot_confints_forecast_with_updated_inputs
 set_seeds(RANDOM_SEED)
-plot_confints_forecast_with_updated_inputs(dl, forecaster, weeks = WEEKS, idx=770, steps_ahead=STEPS_AHEAD)
+plot_confints_forecast_with_updated_inputs(dl, forecaster, weeks = WEEKS, idx=840, steps_ahead=STEPS_AHEAD)
 
 # %%

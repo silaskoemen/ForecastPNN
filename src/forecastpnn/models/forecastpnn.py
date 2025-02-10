@@ -169,35 +169,51 @@ class TCNInception(nn.Module):
         dist = Normal(loc, scale)
         return torch.distributions.Independent(dist, reinterpreted_batch_ndims=1)
 
-
+import numpy as np
 class TCNForecaster(nn.Module):
-    def __init__(self, past_units=42, channels = 3):
+    def __init__(self, past_units=42, channels = 1, kernel_size = [7, 3, 3], att_internal_dim = 10):
         super().__init__()
         # Could do kdim 10, vdim 1 to have same output format but higher internal dim
-        self.att1 = nn.MultiheadAttention(embed_dim=1, num_heads=1, batch_first=True)
+        #self.att1 = nn.MultiheadAttention(embed_dim=1, num_heads=1, batch_first=True, kdim=10, vdim=10)
+        self.query = nn.Linear(1, att_internal_dim)
+        self.key = nn.Linear(1, att_internal_dim)
+        self.value = nn.Linear(1, 1)
         self.fc_att = nn.Linear(past_units, past_units)
-        self.branch7 = nn.Conv1d(1, channels, kernel_size=7, padding='same')
-        self.fc_concat = nn.Linear(channels * past_units, 24)
-        self.fc2 = nn.Linear(24, 12)
-        self.fc_final = nn.Linear(12, 2)
-        self.bnorm1 = nn.BatchNorm1d(num_features=channels*past_units)
-        self.bnorm2 = nn.BatchNorm1d(num_features=24)
-        self.bnorm3 = nn.BatchNorm1d(num_features=12)
+        self.conv1 = nn.Conv1d(1, channels, kernel_size=kernel_size[0])#, padding='same')
+        self.conv2 = nn.Conv1d(channels, channels, kernel_size=kernel_size[1])
+        self.conv3 = nn.Conv1d(channels, 1, kernel_size=kernel_size[2])
+        self.fc_concat = nn.Linear(1 * (past_units - (np.sum(kernel_size) - len(kernel_size))), 16)
+        self.fc1 = nn.Linear(past_units, 2*past_units)
+        self.fc2 = nn.Linear(16, 8)
+        self.fc_final = nn.Linear(8, 2)
+        self.lnorm1 = nn.LayerNorm([1])
+        self.lnorm2 = nn.LayerNorm([1])
+        self.bnorm1 = nn.BatchNorm1d(num_features=1 * (past_units - (np.sum(kernel_size) - len(kernel_size))))
+        self.bnorm2 = nn.BatchNorm1d(num_features=16)
+        self.bnorm3 = nn.BatchNorm1d(num_features=8)
         self.drop1 = nn.Dropout(0.1)
         self.drop2 = nn.Dropout(0.1)
         self.softplus = nn.Softplus()
-        self.const = 50
+        self.softmax = nn.Softmax(dim=-1)
+        self.const = 10
         self.act = nn.SiLU()
+        self.att_internal_dim = att_internal_dim
 
     def forward(self, x):
         # Add self-attention layer
-        x_add = self.att1(x, x, x, need_weights=False)[0]
-        x_add = self.act(self.fc_att(torch.squeeze(x_add)))
-        x = x + x_add.unsqueeze(-1)
+        # x_add = self.att1(x, x, x, need_weights=False)[0]
+        """ x_add = self.softmax(self.query(x) @ self.key(x).transpose(1, 2)/self.att_internal_dim) @ self.value(x)
+        x_add = self.lnorm1(x_add + x)
+        x = self.act(self.fc_att(torch.squeeze(x_add)))
+        x = self.lnorm2(x.unsqueeze(-1) + x_add)  """
         x = x.transpose(1, 2)  # ensure shape [batch_size, 1, length]
-        x_add = self.branch7(x)
-        x = x + x_add
+        x = self.act(self.conv1(x))
+        x = self.act(self.conv2(x))
+        x = self.act(self.conv3(x))
+        #print(x.shape)
+        #x = x + x_add
         x = self.act(self.fc_concat(self.bnorm1(x.view(x.size(0), -1))))
+        #x = self.act(self.fc1(self.bnorm1(x.view(x.size(0), -1))))
         x = self.drop1(x)
         x = self.act(self.fc2(self.bnorm2(x)))
         x = self.drop2(x)
