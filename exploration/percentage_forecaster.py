@@ -142,6 +142,6 @@ forecaster.load_state_dict(torch.load(f".weights/weights-{PAST_UNITS}-{'week' if
 importlib.reload(forecastpnn.utils.plotting)
 from forecastpnn.utils.plotting import plot_confints_forecast_with_updated_inputs
 set_seeds(RANDOM_SEED)
-plot_confints_forecast_with_updated_inputs(dl, forecaster, weeks = WEEKS, idx=840, steps_ahead=STEPS_AHEAD)
+plot_confints_forecast_with_updated_inputs(dl, forecaster, weeks = WEEKS, idx=837, steps_ahead=STEPS_AHEAD)
 
 # %%
